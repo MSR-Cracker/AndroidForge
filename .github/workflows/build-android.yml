@@ -268,6 +268,8 @@ jobs:
           # Make sure desktop + android are enabled
           flutter config --enable-linux-desktop --enable-windows-desktop --enable-macos-desktop || true
 
+
+
       # ---------------------------------------------------------------------
       # Step 8: Restore Gradle cache (per-project, across workflow runs)
       # ---------------------------------------------------------------------
@@ -279,51 +281,50 @@ jobs:
             /root/.gradle/caches
             /root/.gradle/wrapper
             ${{ steps.extract.outputs.project_root }}/.gradle
-          key: gradle-${{ steps.toolchain.outputs.gradle_version }}-${{ hashFiles('**/build.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          key: gradle-${{ steps.toolchain.outputs.gradle_version }}-${{ github.sha }}
           restore-keys: |
             gradle-${{ steps.toolchain.outputs.gradle_version }}-
             gradle-
 
+
+
       # ---------------------------------------------------------------------
-      # Step 9: Restore Flutter/Dart cache (for Flutter projects)
+      # Step 9: Restore Flutter/Dart cache (temporarily disabled)
       # ---------------------------------------------------------------------
       - name: Restore Flutter pub cache
-        if: steps.toolchain.outputs.needs_flutter == 'true'
+        if: false
         uses: actions/cache@v4
         with:
           path: /root/.pub-cache
-          key: flutter-pub-${{ hashFiles('**/pubspec.yaml', '**/pubspec.lock') }}
-          restore-keys: |
-            flutter-pub-
+          key: flutter-pub-cache
 
       # ---------------------------------------------------------------------
       # Step 10: Verify standalone Gradle (used if wrapper is missing)
-      # (Gradle 8.9 is already in the Docker image at /opt/gradle/bin/gradle)
       # ---------------------------------------------------------------------
       - name: Verify standalone Gradle (fallback)
         if: steps.toolchain.outputs.use_wrapper == 'false'
+        shell: bash
         run: |
+          set -e
           GRADLE_VER="${{ steps.toolchain.outputs.gradle_version }}"
-          echo "Image has Gradle 8.9 system-wide at /opt/gradle/bin/gradle"
-          which gradle
-          gradle --version | head -3
-          # The image's system gradle (8.9) is new enough for any AGP 8.x.
-          # Only download a DIFFERENT version if the project needs an older
-          # one (rare — happens for AGP <= 7.x which requires gradle 7.x).
-          # Otherwise, trust the image's gradle and let the build use it.
-          if [ -n "$GRADLE_VER" ] && [ "$GRADLE_VER" != "8.9" ] && [ "$GRADLE_VER" != "8.0" ]; then
-            # Only download if the requested version is older than 8.9 (e.g. 7.5 for AGP 7.4).
-            # For newer Gradle requirements (8.7, 8.10), the image's 8.9 satisfies them.
-            REQ_MAJOR=$(echo "$GRADLE_VER" | cut -d. -f1)
-            if [ "$REQ_MAJOR" -lt 8 ]; then
-              echo "Project wants older Gradle $GRADLE_VER — downloading..."
-              wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -O /tmp/gradle.zip
-              unzip -q /tmp/gradle.zip -d /opt
-              echo "/opt/gradle-${GRADLE_VER}/bin" >> "$GITHUB_PATH"
-            else
-              echo "✓ Image's Gradle 8.9 satisfies the project's requirement of $GRADLE_VER+"
-            fi
+
+          if [ -z "$GRADLE_VER" ]; then
+            GRADLE_VER="8.9"
           fi
+
+          echo "Required Gradle version: $GRADLE_VER"
+
+          if [ "$GRADLE_VER" != "8.9" ]; then
+            echo "Downloading Gradle $GRADLE_VER..."
+            wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -O /tmp/gradle.zip
+            unzip -q /tmp/gradle.zip -d /opt
+            echo "/opt/gradle-${GRADLE_VER}/bin" >> "$GITHUB_PATH"
+            export PATH="/opt/gradle-${GRADLE_VER}/bin:$PATH"
+          fi
+
+          echo "Gradle version in use:"
+          gradle --version
+
 
       # ---------------------------------------------------------------------
       # Step 11: Build the project (writes build.json)
